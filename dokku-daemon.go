@@ -1,6 +1,7 @@
 package main
 
 import (
+        "bytes"
         "encoding/json"
         "fmt"
         "github.com/takama/daemon"
@@ -29,7 +30,6 @@ var dependencies = []string{}
 var logFile os.File
 var stdlog, errlog *log.Logger
 
-// Service has embedded daemon
 type Service struct {
         daemon.Daemon
 }
@@ -136,13 +136,14 @@ func removeService(service *Service) (string, error) {
 }
 
 // Runs the given bash command
-func runcmd(cmd string, shell bool) ([]byte, error) {
+func runcmd(cmdStr string, shell bool) (string, error) {
         var cmdOut, cmdErr bytes.Buffer
-        var cmd Cmd
+        var cmd *exec.Cmd
+
         if shell {
-                cmd = exec.Command("bash", "-c", cmd)
+                cmd = exec.Command("bash", "-c", cmdStr)
         } else {
-                cmd = exec.Command("-c", cmd)
+                cmd = exec.Command("-c", cmdStr)
         }
 
         cmd.Stdout = &cmdOut
@@ -151,9 +152,9 @@ func runcmd(cmd string, shell bool) ([]byte, error) {
         err := cmd.Run()
 
         if err != nil {
-                return nil, err
+                return cmdErr.String(), err
         }
-        return out, nil
+        return cmdOut.String(), nil
 }
 
 func isValidCommand(cmd string) bool {
@@ -171,7 +172,7 @@ func handleClient(client net.Conn) {
                 receivedData := buf[0:numbytes]
                 var receivedDataStr = string(receivedData)
 
-                var commandOut []byte
+                var commandOut string
                 commandOut, err = runcmd(fmt.Sprintf("dokku %s", receivedDataStr), true)
 
                 var resp Response
@@ -179,11 +180,11 @@ func handleClient(client net.Conn) {
                 if err != nil {
                         resp = Response{
                                 Status: "error",
-                                Output: "Command is not valid"}
+                                Output: commandOut}
                 } else {
                         resp = Response{
                                 Status: "success",
-                                Output: string(commandOut)}
+                                Output: commandOut}
                 }
 
                 respJson, _ := json.Marshal(resp)
@@ -193,11 +194,6 @@ func handleClient(client net.Conn) {
 }
 
 func init() {
-        //logFile, err := os.OpenFile("/var/log/dokku-daemon.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
-        //if err != nil {
-        //      return
-        //}
-
         stdlog = log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime)
         errlog = log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime)
 }
