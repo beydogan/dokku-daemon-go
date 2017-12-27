@@ -3,7 +3,7 @@
 
 BOX_NAME = ENV["BOX_NAME"] || "bento/ubuntu-14.04"
 BOX_MEMORY = ENV["BOX_MEMORY"] || "1024"
-DOKKU_TAG = ENV["DOKKU_TAG"] || "v0.10.5"
+DOKKU_TAG = ENV["DOKKU_TAG"] || "v0.11.2"
 
 Vagrant.configure(2) do |config|
   config.vm.box = BOX_NAME
@@ -14,12 +14,16 @@ Vagrant.configure(2) do |config|
     # default in Virtualbox and thus will not boot. Manually override that.
     vb.customize ["modifyvm", :id, "--ostype", "Ubuntu_64"]
     vb.customize ["modifyvm", :id, "--memory", BOX_MEMORY]
+    vb.customize ["modifyvm", :id, "--cpus", 2]
   end
 
   config.vm.define "dokku-daemon", primary: true do |vm|
     vm.vm.synced_folder File.dirname(__FILE__), "/dokku-daemon"
 
     vm.vm.provision :shell, :inline => "apt-get update > /dev/null && apt-get -qq -y install git > /dev/null"
-    vm.vm.provision :shell, :inline => "wget https://raw.githubusercontent.com/dokku/dokku/#{DOKKU_TAG}/bootstrap.sh && DOKKU_TAG=#{DOKKU_TAG} bash bootstrap.sh"
+    vm.vm.provision :shell, :inline => "wget https://raw.githubusercontent.com/dokku/dokku/#{DOKKU_TAG}/bootstrap.sh && DOKKU_TAG=#{DOKKU_TAG} NO_INSTALL_RECOMMENDS=--no-install-recommends bash bootstrap.sh"
+    vm.vm.provision :shell, :inline => "cd /dokku-daemon && make ci-dependencies develop"
+    vm.vm.provision :shell, :inline => "[[ `/sbin/init --version 2>&1` =~ upstart ]] && initctl reload-configuration"
+    vm.vm.provision :shell, :inline => "[[ `systemctl 2>&1` =~ -\.mount ]] && systemctl daemon-reload"
   end
 end

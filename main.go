@@ -1,7 +1,6 @@
 package main
 
 import (
-	"./parser"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -11,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"syscall"
+	"os/user"
+	"strconv"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -21,13 +22,13 @@ const (
 
 	socketFolder = "/var/run/dokku-daemon"
 	socketFile   = "dokku-daemon.sock"
-	user         = "dokku"
-	group        = "dokku"
+	userName     = "dokku"
+	groupName    = "dokku"
 	perms        = 0777
 )
 
 var socketPath = fmt.Sprintf("%s/%s", socketFolder, socketFile)
-
+var uid, gid int
 var dependencies = []string{}
 var logFile os.File
 var stdlog, errlog *log.Logger
@@ -37,12 +38,11 @@ type Service struct {
 }
 
 type Response struct {
-	Status string `json:"status"`
+	Status string            `json:"status"`
 	Output map[string]string `json:"output"`
 }
 
 func (service *Service) Manage() (string, error) {
-
 	usage := "Usage: myservice install | remove | start | stop | status"
 
 	// if received any kind of command, do it
@@ -83,8 +83,13 @@ func (service *Service) Manage() (string, error) {
 	if err != nil {
 		return "Possibly was a problem with the socket creation", err
 	}
-
+	// Update socket perms
+	err = os.Chown(socketPath, uid, gid)
+	if err != nil {
+		return "Socket permission error", err
+	}
 	listen := make(chan net.Conn, 100)
+
 	go acceptConnection(listener, listen)
 
 	for {
@@ -119,10 +124,7 @@ func acceptConnection(listener net.Listener, listen chan<- net.Conn) {
 func installService(service *Service) (string, error) {
 	if _, err := os.Stat(socketFolder); os.IsNotExist(err) {
 		os.Mkdir(socketFolder, perms)
-		_, err := exec.Command("chown", fmt.Sprintf("%s:%s", user, group), socketFolder).Output()
-		if err != nil {
-			errlog.Println("Error while chown socket folder")
-		}
+		os.Chown(socketFolder, uid, gid)
 	}
 
 	return service.Install()
@@ -138,9 +140,10 @@ func removeService(service *Service) (string, error) {
 }
 
 // Runs the given bash command
-func runCmd(cmdStr string, shell bool) (string, error) {
+func runCmd(command string, params []string, shell bool) (string, error) {
 	var cmdOut, cmdErr bytes.Buffer
 	var cmd *exec.Cmd
+	var cmdStr = fmt.Sprintf("dokku %s %s", command, strings.Join(params, " "))
 
 	if shell {
 		cmd = exec.Command("bash", "-c", cmdStr)
@@ -177,7 +180,7 @@ func handleClient(client net.Conn) {
 		command := stripCommand(receivedDataArr[0])
 
 		var commandOut string
-		commandOut, err = runCmd(fmt.Sprintf("dokku %s %s", command, strings.Join(receivedDataArr[1:], " ")), true)
+		commandOut, err = runCmd(command, receivedDataArr[1:], true)
 
 		var resp Response
 
@@ -187,18 +190,11 @@ func handleClient(client net.Conn) {
 				Status: "error",
 				Output: output}
 		} else {
-			_, err := parser.Parse(command, commandOut)
 			output := map[string]string{"message": commandOut}
-
-			if err != nil{
-				resp = Response{
-					Status: "success",
-					Output: output}
-			}else{
-				fmt.Printf("%s\n", err)
-			}
+			resp = Response{
+				Status: "success",
+				Output: output}
 		}
-
 		respJson, _ := json.Marshal(resp)
 		client.Write(respJson)
 		client.Write([]byte("\n"))
@@ -206,6 +202,11 @@ func handleClient(client net.Conn) {
 }
 
 func init() {
+	var usr, _ = user.Lookup(userName)
+	var grp, _ = user.LookupGroup(groupName)
+	uid, _ = strconv.Atoi(usr.Uid)
+	gid, _ = strconv.Atoi(grp.Gid)
+
 	stdlog = log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime)
 	errlog = log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime)
 }
@@ -226,7 +227,7 @@ func main() {
 	fmt.Println(status)
 }
 
-func stripCommand(cmd string) string{
+func stripCommand(cmd string) string {
 	result := strings.Trim(cmd, " ")
 	result = strings.Trim(result, "\n")
 	return result
