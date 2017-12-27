@@ -27,3 +27,7 @@ sudo socat - UNIX-CONNECT:/var/run/dokku-daemon/dokku-daemon.sock
 ```
 
 and type `apps`. It should return the output in JSON format.
+
+```
+{"status":"success","output":{"message":"=====\u003e My Apps\nhello\n"}}
+```
