@@ -18,7 +18,7 @@ sudo service dokku-daemon start
 
 # Usage
 
-Daemon will create a UNIX socket at `/var/run/dokku-daemon/dokku-daemon.sock`.
+Daemon will create a UNIX socket at `/var/run/dokku-daemon/dokku-daemon.sock` owned by `dokku` user.
 
 To test you can use;
 
